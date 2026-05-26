@@ -6,6 +6,19 @@ Construire un indicateur Quantower C# robuste qui affiche en temps reel la perte
 
 L'indicateur doit rester simple dans son coeur mathematique: il echantillonne l'etat compte fourni par Quantower, conserve le plus haut niveau d'equity de la session, puis calcule la perte comme une soustraction d'etat.
 
+## Etat Actuel
+
+- [x] Projet Visual Studio cree.
+- [x] `.gitignore` ajoute pour Visual Studio, .NET et caches locaux.
+- [x] Squelette indicateur remplace par une base DCL en fenetre separee.
+- [x] Parametres Quantower initiaux: compte, limite journaliere, heure de reset Paris.
+- [x] Coeur de calcul `DclState` ajoute: equity, peak, DCL, remaining DLL, liquidation threshold.
+- [x] `SessionClock` ajoute pour gerer le debut de session a 23:00 Europe/Paris.
+- [x] Cache CSV local ajoute: restauration du dernier peak et append async sur nouveau peak.
+- [ ] Reference locale `TradingPlatform.BusinessLayer.dll` a fournir pour compiler hors Quantower.
+- [ ] Rendu HUD custom.
+- [ ] Fallback historique.
+
 ## Principes Directeurs
 
 - Calculer `DCL = DailyPeakBalance - CurrentEquity`, jamais par accumulation de ticks.
