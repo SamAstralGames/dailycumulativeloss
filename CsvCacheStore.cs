@@ -13,6 +13,12 @@ namespace DailyCumulativeLoss
         private readonly object fileLock = new object();
         private readonly string cacheDirectory;
 
+        public string LastReadStatus { get; private set; } = "not checked";
+        public string LastError { get; private set; } = string.Empty;
+        public string LastPath { get; private set; } = string.Empty;
+        public int WriteCount { get; private set; }
+        public DateTime? LastWriteUtc { get; private set; }
+
         public CsvCacheStore(string cacheDirectory)
         {
             this.cacheDirectory = string.IsNullOrWhiteSpace(cacheDirectory)
@@ -24,9 +30,14 @@ namespace DailyCumulativeLoss
         {
             snapshot = default;
             string path = GetCachePath(accountName, sessionDateKey);
+            LastPath = path;
+            LastError = string.Empty;
 
             if (!File.Exists(path))
+            {
+                LastReadStatus = "cache missing";
                 return false;
+            }
 
             try
             {
@@ -36,13 +47,19 @@ namespace DailyCumulativeLoss
                         continue;
 
                     if (TryParseSnapshot(line, out snapshot))
+                    {
+                        LastReadStatus = "cache restored";
                         return true;
+                    }
                 }
 
+                LastReadStatus = "cache invalid";
                 return false;
             }
-            catch
+            catch (Exception ex)
             {
+                LastReadStatus = "cache read error";
+                LastError = ex.Message;
                 return false;
             }
         }
@@ -71,10 +88,16 @@ namespace DailyCumulativeLoss
 
                         writer.WriteLine(line);
                     }
+
+                    WriteCount++;
+                    LastWriteUtc = DateTime.UtcNow;
+                    LastPath = path;
+                    LastError = string.Empty;
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                LastError = ex.Message;
             }
         }
 
