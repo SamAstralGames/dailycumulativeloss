@@ -30,11 +30,16 @@ namespace DailyCumulativeLoss
 
             try
             {
-                string lastDataLine = File.ReadLines(path)
-                    .Reverse()
-                    .FirstOrDefault(line => !string.IsNullOrWhiteSpace(line) && !line.StartsWith("Timestamp_", StringComparison.OrdinalIgnoreCase));
+                foreach (string line in File.ReadLines(path).Reverse())
+                {
+                    if (string.IsNullOrWhiteSpace(line) || line.StartsWith("Timestamp_", StringComparison.OrdinalIgnoreCase))
+                        continue;
 
-                return lastDataLine != null && TryParseSnapshot(lastDataLine, out snapshot);
+                    if (TryParseSnapshot(line, out snapshot))
+                        return true;
+                }
+
+                return false;
             }
             catch
             {

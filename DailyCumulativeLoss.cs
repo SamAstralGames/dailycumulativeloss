@@ -20,11 +20,18 @@ namespace DailyCumulativeLoss
         [InputParameter("Cache directory", 3)]
         public string CacheDirectory = string.Empty;
 
+        [InputParameter("HUD enabled", 4)]
+        public bool HudEnabled = true;
+
+        [InputParameter("Flashing alert", 5)]
+        public bool FlashingAlertEnabled = true;
+
         private readonly DclState state = new DclState();
         private SessionClock sessionClock;
         private CsvCacheStore cacheStore;
         private DateTime? currentSessionStartUtc;
         private string currentSessionDateKey;
+        private bool coreEventsSubscribed;
 
         public DailyCumulativeLoss()
             : base()
@@ -43,6 +50,7 @@ namespace DailyCumulativeLoss
         {
             SelectedAccount ??= Core.Instance.Accounts.FirstOrDefault();
             ResetStateForCurrentSession();
+            SubscribeCoreEvents();
         }
 
         protected override void OnSettingsUpdated()
@@ -55,6 +63,7 @@ namespace DailyCumulativeLoss
         {
             if (SelectedAccount == null || MaxDailyLoss <= 0)
             {
+                state.Reset();
                 BreakAllLines();
                 return;
             }
@@ -74,6 +83,61 @@ namespace DailyCumulativeLoss
 
             if (!hadSnapshot || snapshot.DailyPeakBalance > previousPeak)
                 cacheStore.AppendAsync(SelectedAccount.Name, currentSessionDateKey, snapshot, sessionClock.ToLocalTime(nowUtc));
+        }
+
+        protected override void OnClear()
+        {
+            UnsubscribeCoreEvents();
+            base.OnClear();
+        }
+
+        public override void OnPaintChart(PaintChartEventArgs args)
+        {
+            base.OnPaintChart(args);
+
+            if (!HudEnabled || !state.HasSnapshot || args?.Graphics == null)
+                return;
+
+            DrawHud(args.Graphics, args.Rectangle, state.Snapshot);
+        }
+
+        private void DrawHud(Graphics graphics, Rectangle panel, DclSnapshot snapshot)
+        {
+            if (panel.Width < 180 || panel.Height < 80)
+                return;
+
+            DclRiskLevel riskLevel = GetRiskLevel(snapshot);
+            bool flashOff = riskLevel == DclRiskLevel.Critical &&
+                FlashingAlertEnabled &&
+                DateTime.UtcNow.Second % 2 == 0;
+
+            Color accent = flashOff ? Color.FromArgb(90, 90, 90) : GetRiskColor(riskLevel);
+            string text =
+                $"DLL rem: {FormatCurrency(snapshot.RemainingDailyLimit)}\n" +
+                $"DCL: {FormatCurrency(snapshot.DailyCumulativeLoss)}\n" +
+                $"Peak: {FormatCurrency(snapshot.DailyPeakBalance)}\n" +
+                $"Equity: {FormatCurrency(snapshot.CurrentEquity)}";
+
+            using Font font = new Font("Segoe UI", 10, FontStyle.Bold);
+            using StringFormat format = new StringFormat
+            {
+                Alignment = StringAlignment.Near,
+                LineAlignment = StringAlignment.Near
+            };
+
+            SizeF textSize = graphics.MeasureString(text, font);
+            int padding = 10;
+            int width = Math.Min(panel.Width - 16, (int)Math.Ceiling(textSize.Width) + padding * 2);
+            int height = Math.Min(panel.Height - 16, (int)Math.Ceiling(textSize.Height) + padding * 2);
+            Rectangle hudRect = new Rectangle(panel.Right - width - 8, panel.Top + 8, width, height);
+
+            using SolidBrush background = new SolidBrush(Color.FromArgb(185, 18, 22, 28));
+            using Pen border = new Pen(accent, 2);
+            using SolidBrush foreground = new SolidBrush(accent);
+
+            graphics.FillRectangle(background, hudRect);
+            graphics.DrawRectangle(border, hudRect);
+            graphics.DrawString(text, font, foreground, hudRect.Left + padding, hudRect.Top + padding, format);
         }
 
         private void ResetStateForCurrentSession()
@@ -107,6 +171,41 @@ namespace DailyCumulativeLoss
                 state.RestoreDailyPeak(snapshot.DailyPeakBalance);
         }
 
+        private void SubscribeCoreEvents()
+        {
+            if (coreEventsSubscribed)
+                return;
+
+            Core.Instance.ClosedPositionAdded += OnClosedPositionAdded;
+            coreEventsSubscribed = true;
+        }
+
+        private void UnsubscribeCoreEvents()
+        {
+            if (!coreEventsSubscribed)
+                return;
+
+            Core.Instance.ClosedPositionAdded -= OnClosedPositionAdded;
+            coreEventsSubscribed = false;
+        }
+
+        private void OnClosedPositionAdded(ClosedPosition closedPosition)
+        {
+            if (SelectedAccount == null ||
+                MaxDailyLoss <= 0 ||
+                !TradingObjectBelongsToAccount(closedPosition, SelectedAccount))
+                return;
+
+            DateTime nowUtc = DateTime.UtcNow;
+            EnsureCurrentSession(nowUtc);
+
+            double balance = SelectedAccount.Balance;
+            double openPnL = GetOpenProfitLoss(SelectedAccount);
+            DclSnapshot snapshot = state.Update(nowUtc, balance, openPnL, MaxDailyLoss);
+
+            cacheStore.AppendAsync(SelectedAccount.Name, currentSessionDateKey, snapshot, sessionClock.ToLocalTime(nowUtc));
+        }
+
         private double GetOpenProfitLoss(Account account)
         {
             if (TryReadNumericProperty(account, "OpenProfitLoss", out double accountOpenPnL))
@@ -126,13 +225,18 @@ namespace DailyCumulativeLoss
 
         private static bool PositionBelongsToAccount(Position position, Account account)
         {
-            if (TryReadObjectProperty(position, "Account", out object positionAccount))
+            return TradingObjectBelongsToAccount(position, account);
+        }
+
+        private static bool TradingObjectBelongsToAccount(object tradingObject, Account account)
+        {
+            if (TryReadObjectProperty(tradingObject, "Account", out object positionAccount))
                 return Equals(positionAccount, account);
 
-            if (TryReadStringProperty(position, "AccountId", out string accountId))
+            if (TryReadStringProperty(tradingObject, "AccountId", out string accountId))
                 return string.Equals(accountId, account.Id, StringComparison.OrdinalIgnoreCase);
 
-            if (TryReadStringProperty(position, "AccountName", out string accountName))
+            if (TryReadStringProperty(tradingObject, "AccountName", out string accountName))
                 return string.Equals(accountName, account.Name, StringComparison.OrdinalIgnoreCase);
 
             return false;
@@ -236,6 +340,37 @@ namespace DailyCumulativeLoss
         private static bool IsFinite(double value)
         {
             return !double.IsNaN(value) && !double.IsInfinity(value);
+        }
+
+        private DclRiskLevel GetRiskLevel(DclSnapshot snapshot)
+        {
+            double ratio = snapshot.RemainingDailyLimit / MaxDailyLoss;
+
+            if (ratio < 0.25)
+                return DclRiskLevel.Critical;
+
+            if (ratio <= 0.5)
+                return DclRiskLevel.Warning;
+
+            return DclRiskLevel.Safe;
+        }
+
+        private static Color GetRiskColor(DclRiskLevel riskLevel)
+        {
+            switch (riskLevel)
+            {
+                case DclRiskLevel.Critical:
+                    return Color.Crimson;
+                case DclRiskLevel.Warning:
+                    return Color.Orange;
+                default:
+                    return Color.LimeGreen;
+            }
+        }
+
+        private static string FormatCurrency(double value)
+        {
+            return value.ToString("C2", CultureInfo.CurrentCulture);
         }
 
         private void BreakAllLines()

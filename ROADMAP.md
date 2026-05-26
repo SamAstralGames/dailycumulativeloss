@@ -15,8 +15,10 @@ L'indicateur doit rester simple dans son coeur mathematique: il echantillonne l'
 - [x] Coeur de calcul `DclState` ajoute: equity, peak, DCL, remaining DLL, liquidation threshold.
 - [x] `SessionClock` ajoute pour gerer le debut de session a 23:00 Europe/Paris.
 - [x] Cache CSV local ajoute: restauration du dernier peak et append async sur nouveau peak.
-- [ ] Reference locale `TradingPlatform.BusinessLayer.dll` a fournir pour compiler hors Quantower.
-- [ ] Rendu HUD custom.
+- [x] Lecture CSV resiliente: les lignes corrompues en fin de fichier sont ignorees.
+- [x] Append CSV force sur `ClosedPositionAdded` quand la position cloturee appartient au compte suivi.
+- [x] Reference locale `TradingPlatform.BusinessLayer.dll` configuree via projet Visual Studio.
+- [x] Rendu HUD custom ajoute avec couleurs de risque et clignotement critique.
 - [ ] Fallback historique.
 
 ## Principes Directeurs
