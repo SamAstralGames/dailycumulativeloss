@@ -19,6 +19,8 @@ L'indicateur doit rester simple dans son coeur mathematique: il echantillonne l'
 - [x] Append CSV force sur `ClosedPositionAdded` quand la position cloturee appartient au compte suivi.
 - [x] Reference locale `TradingPlatform.BusinessLayer.dll` configuree via projet Visual Studio.
 - [x] Rendu HUD custom ajoute avec couleurs de risque et clignotement critique.
+- [x] Axe Y relatif implemente: `0` = liquidation, `MaxDailyLoss` = room maximale, ligne principale = DLL restante.
+- [x] Bandes de fond safe/warning/critical ajoutees dans le panel.
 - [ ] Fallback historique.
 
 ## Principes Directeurs

@@ -8,6 +8,10 @@ namespace DailyCumulativeLoss
 {
     public class DailyCumulativeLoss : Indicator
     {
+        private const int RemainingLineIndex = 0;
+        private const int MaxLimitLineIndex = 1;
+        private const int LiquidationLineIndex = 2;
+
         [InputParameter("Account", 0)]
         public Account SelectedAccount;
 
@@ -39,9 +43,9 @@ namespace DailyCumulativeLoss
             Name = "Daily Cumulative Loss";
             Description = "Tracks daily cumulative loss from the account equity peak.";
 
-            AddLineSeries("Equity", Color.DodgerBlue, 2, LineStyle.Solid);
-            AddLineSeries("Daily peak", Color.LimeGreen, 2, LineStyle.StepLine);
-            AddLineSeries("Liquidation", Color.Crimson, 2, LineStyle.Solid);
+            AddLineSeries("DLL remaining", Color.DodgerBlue, 2, LineStyle.Solid);
+            AddLineSeries("Max daily loss", Color.LimeGreen, 2, LineStyle.StepLine);
+            AddLineSeries("Liquidation 0", Color.Crimson, 2, LineStyle.Solid);
 
             SeparateWindow = true;
         }
@@ -77,9 +81,7 @@ namespace DailyCumulativeLoss
             double previousPeak = hadSnapshot ? state.Snapshot.DailyPeakBalance : 0;
             DclSnapshot snapshot = state.Update(nowUtc, balance, openPnL, MaxDailyLoss);
 
-            SetValue(snapshot.CurrentEquity, 0);
-            SetValue(snapshot.DailyPeakBalance, 1);
-            SetValue(snapshot.LiquidationThreshold, 2);
+            PlotRelativeRisk(snapshot);
 
             if (!hadSnapshot || snapshot.DailyPeakBalance > previousPeak)
                 cacheStore.AppendAsync(SelectedAccount.Name, currentSessionDateKey, snapshot, sessionClock.ToLocalTime(nowUtc));
@@ -93,12 +95,60 @@ namespace DailyCumulativeLoss
 
         public override void OnPaintChart(PaintChartEventArgs args)
         {
+            if (args?.Graphics != null && MaxDailyLoss > 0)
+                DrawRiskZones(args.Graphics, args.Rectangle);
+
             base.OnPaintChart(args);
 
             if (!HudEnabled || !state.HasSnapshot || args?.Graphics == null)
                 return;
 
             DrawHud(args.Graphics, args.Rectangle, state.Snapshot);
+        }
+
+        protected override bool OnTryGetMinMax(int fromOffset, int toOffset, out double min, out double max)
+        {
+            if (MaxDailyLoss <= 0)
+            {
+                min = 0;
+                max = 0;
+                return false;
+            }
+
+            GetRelativeScaleBounds(out min, out max);
+            return true;
+        }
+
+        private void DrawRiskZones(Graphics graphics, Rectangle panel)
+        {
+            if (panel.Width <= 0 || panel.Height <= 0)
+                return;
+
+            GetRelativeScaleBounds(out double min, out double max);
+
+            FillRiskZone(graphics, panel, min, max, min, MaxDailyLoss * 0.25, Color.FromArgb(26, Color.Crimson));
+            FillRiskZone(graphics, panel, min, max, MaxDailyLoss * 0.25, MaxDailyLoss * 0.5, Color.FromArgb(20, Color.Orange));
+            FillRiskZone(graphics, panel, min, max, MaxDailyLoss * 0.5, max, Color.FromArgb(16, Color.LimeGreen));
+        }
+
+        private static void FillRiskZone(Graphics graphics, Rectangle panel, double min, double max, double valueFrom, double valueTo, Color color)
+        {
+            int top = ValueToY(panel, min, max, valueTo);
+            int bottom = ValueToY(panel, min, max, valueFrom);
+            int height = Math.Max(1, bottom - top);
+
+            using SolidBrush brush = new SolidBrush(color);
+            graphics.FillRectangle(brush, panel.Left, top, panel.Width, height);
+        }
+
+        private static int ValueToY(Rectangle panel, double min, double max, double value)
+        {
+            if (max <= min)
+                return panel.Bottom;
+
+            double clamped = Math.Max(min, Math.Min(max, value));
+            double ratio = (clamped - min) / (max - min);
+            return panel.Bottom - (int)Math.Round(ratio * panel.Height);
         }
 
         private void DrawHud(Graphics graphics, Rectangle panel, DclSnapshot snapshot)
@@ -169,6 +219,23 @@ namespace DailyCumulativeLoss
 
             if (cacheStore.TryReadLastSnapshot(SelectedAccount.Name, currentSessionDateKey, out DclSnapshot snapshot))
                 state.RestoreDailyPeak(snapshot.DailyPeakBalance);
+        }
+
+        private void PlotRelativeRisk(DclSnapshot snapshot)
+        {
+            SetValue(snapshot.RemainingDailyLimit, RemainingLineIndex);
+            SetValue(MaxDailyLoss, MaxLimitLineIndex);
+            SetValue(0, LiquidationLineIndex);
+        }
+
+        private void GetRelativeScaleBounds(out double min, out double max)
+        {
+            min = state.HasSnapshot ? Math.Min(0, state.Snapshot.RemainingDailyLimit) : 0;
+            max = MaxDailyLoss;
+
+            double padding = Math.Max(MaxDailyLoss * 0.05, 1);
+            min -= padding;
+            max += padding;
         }
 
         private void SubscribeCoreEvents()
@@ -375,9 +442,9 @@ namespace DailyCumulativeLoss
 
         private void BreakAllLines()
         {
-            SetLineBreak(0, 0);
-            SetLineBreak(0, 1);
-            SetLineBreak(0, 2);
+            SetLineBreak(0, RemainingLineIndex);
+            SetLineBreak(0, MaxLimitLineIndex);
+            SetLineBreak(0, LiquidationLineIndex);
         }
     }
 }
