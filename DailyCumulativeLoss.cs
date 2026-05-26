@@ -348,6 +348,7 @@ namespace DailyCumulativeLoss
             if (cacheStore.TryReadLastSnapshot(SelectedAccount.Name, currentSessionDateKey, out DclSnapshot snapshot))
             {
                 state.RestoreDailyPeak(snapshot.DailyPeakBalance);
+                RestoreAlertStateFromCachedDcl(cacheStore.LastRestoredDailyCumulativeLoss);
                 return true;
             }
 
@@ -412,12 +413,14 @@ namespace DailyCumulativeLoss
             string cacheStatus = cacheStore?.LastReadStatus ?? "none";
             string cacheError = string.IsNullOrWhiteSpace(cacheStore?.LastError) ? "ok" : Truncate(cacheStore.LastError, 42);
             string cacheFile = string.IsNullOrWhiteSpace(cacheStore?.LastPath) ? "none" : Path.GetFileName(cacheStore.LastPath);
+            string cachedMaxDcl = FormatCurrency(cacheStore?.MaxCachedDailyCumulativeLoss ?? 0);
 
             return text +
                 $"\nSession: {currentSessionDateKey}" +
                 $"\nRecovery: {recoveryStatus}" +
                 $"\nCache: {cacheStatus}" +
                 $"\nFile: {cacheFile}" +
+                $"\nCache max DCL: {cachedMaxDcl}" +
                 $"\nWrites: {cacheStore?.WriteCount ?? 0} @ {lastWrite}" +
                 $"\nI/O: {cacheError}";
         }
@@ -687,6 +690,21 @@ namespace DailyCumulativeLoss
         {
             warningAlertSent = false;
             criticalAlertSent = false;
+        }
+
+        private void RestoreAlertStateFromCachedDcl(double cachedDcl)
+        {
+            double cachedRemaining = MaxDailyLoss - cachedDcl;
+
+            if (cachedRemaining < MaxDailyLoss * 0.25)
+            {
+                criticalAlertSent = true;
+                warningAlertSent = true;
+                return;
+            }
+
+            if (cachedRemaining <= MaxDailyLoss * 0.5)
+                warningAlertSent = true;
         }
 
         private static DateTime ToUtc(DateTime dateTime)

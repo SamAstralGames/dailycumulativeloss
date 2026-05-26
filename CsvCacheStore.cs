@@ -20,6 +20,8 @@ namespace DailyCumulativeLoss
         public string LastPath { get; private set; } = string.Empty;
         public int WriteCount { get; private set; }
         public DateTime? LastWriteUtc { get; private set; }
+        public double LastRestoredDailyCumulativeLoss { get; private set; }
+        public double MaxCachedDailyCumulativeLoss { get; private set; }
 
         public CsvCacheStore(string cacheDirectory)
         {
@@ -34,6 +36,8 @@ namespace DailyCumulativeLoss
             string path = GetCachePath(accountName, sessionDateKey);
             LastPath = path;
             LastError = string.Empty;
+            LastRestoredDailyCumulativeLoss = 0;
+            MaxCachedDailyCumulativeLoss = 0;
 
             if (!File.Exists(path))
             {
@@ -43,16 +47,26 @@ namespace DailyCumulativeLoss
 
             try
             {
-                foreach (string line in File.ReadLines(path).Reverse())
+                bool foundSnapshot = false;
+
+                foreach (string line in File.ReadLines(path))
                 {
                     if (string.IsNullOrWhiteSpace(line) || line.StartsWith("Timestamp_", StringComparison.OrdinalIgnoreCase))
                         continue;
 
-                    if (TryParseSnapshot(line, out snapshot))
+                    if (TryParseSnapshot(line, out DclSnapshot parsedSnapshot))
                     {
-                        LastReadStatus = "cache restored";
-                        return true;
+                        snapshot = parsedSnapshot;
+                        foundSnapshot = true;
+                        LastRestoredDailyCumulativeLoss = parsedSnapshot.DailyCumulativeLoss;
+                        MaxCachedDailyCumulativeLoss = Math.Max(MaxCachedDailyCumulativeLoss, parsedSnapshot.DailyCumulativeLoss);
                     }
+                }
+
+                if (foundSnapshot)
+                {
+                    LastReadStatus = "cache restored";
+                    return true;
                 }
 
                 LastReadStatus = "cache invalid";

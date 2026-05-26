@@ -26,6 +26,8 @@ L'indicateur doit rester simple dans son coeur mathematique: il echantillonne l'
 - [x] Guides horizontaux 100% / 50% / 25% / 0 ajoutes avec labels optionnels.
 - [x] Courbe DLL restante colorisee par segments: vert en recuperation, rouge en degradation, crimson en zone critique.
 - [x] Mode diagnostic optionnel ajoute au HUD: session, statut cache, nombre d'ecritures, derniere erreur I/O.
+- [x] Diagnostic cache enrichi avec le max DCL restaure depuis le CSV.
+- [x] Anti-spam alertes restaure depuis le dernier DCL cache apres redemarrage.
 - [x] Fallback historique conservateur ajoute: reconstruction du peak realise depuis les positions cloturees de la session quand le cache est absent.
 - [x] Alertes plateforme optionnelles ajoutees: warning a 50% restant, critique a 25%, une fois par session.
 - [x] README ajoute avec installation, parametres, cache et checklist de validation.
