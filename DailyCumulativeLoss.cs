@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using TradingPlatform.BusinessLayer;
 
@@ -105,6 +106,7 @@ namespace DailyCumulativeLoss
 
         protected override void OnClear()
         {
+            cacheStore?.Flush(TimeSpan.FromMilliseconds(250));
             UnsubscribeCoreEvents();
             base.OnClear();
         }
@@ -231,7 +233,7 @@ namespace DailyCumulativeLoss
             for (int barIndex = startIndex; barIndex <= endIndex; barIndex++)
             {
                 int offset = Count - 1 - barIndex;
-                double value = GetValue(RemainingLineIndex, offset);
+                double value = GetValue(offset, RemainingLineIndex);
 
                 if (!IsFinite(value))
                 {
@@ -409,11 +411,13 @@ namespace DailyCumulativeLoss
             string lastWrite = cacheStore?.LastWriteUtc?.ToLocalTime().ToString("HH:mm:ss", CultureInfo.CurrentCulture) ?? "none";
             string cacheStatus = cacheStore?.LastReadStatus ?? "none";
             string cacheError = string.IsNullOrWhiteSpace(cacheStore?.LastError) ? "ok" : Truncate(cacheStore.LastError, 42);
+            string cacheFile = string.IsNullOrWhiteSpace(cacheStore?.LastPath) ? "none" : Path.GetFileName(cacheStore.LastPath);
 
             return text +
                 $"\nSession: {currentSessionDateKey}" +
                 $"\nRecovery: {recoveryStatus}" +
                 $"\nCache: {cacheStatus}" +
+                $"\nFile: {cacheFile}" +
                 $"\nWrites: {cacheStore?.WriteCount ?? 0} @ {lastWrite}" +
                 $"\nI/O: {cacheError}";
         }

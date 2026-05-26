@@ -75,6 +75,23 @@ namespace DailyCumulativeLoss
                 writeQueue = writeQueue.ContinueWith(_ => Append(path, line), TaskScheduler.Default);
         }
 
+        public void Flush(TimeSpan timeout)
+        {
+            Task pendingWrites;
+
+            lock (queueLock)
+                pendingWrites = writeQueue;
+
+            try
+            {
+                pendingWrites.Wait(timeout);
+            }
+            catch (Exception ex)
+            {
+                LastError = ex.Message;
+            }
+        }
+
         private void Append(string path, string line)
         {
             try
