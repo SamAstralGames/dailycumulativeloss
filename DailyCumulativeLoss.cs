@@ -36,12 +36,17 @@ namespace DailyCumulativeLoss
         [InputParameter("Enable historical recovery", 7)]
         public bool EnableHistoricalRecovery = true;
 
+        [InputParameter("Enable platform alerts", 8)]
+        public bool EnablePlatformAlerts = true;
+
         private readonly DclState state = new DclState();
         private SessionClock sessionClock;
         private CsvCacheStore cacheStore;
         private DateTime? currentSessionStartUtc;
         private string currentSessionDateKey;
         private string recoveryStatus = "not checked";
+        private bool warningAlertSent;
+        private bool criticalAlertSent;
         private bool coreEventsSubscribed;
 
         public DailyCumulativeLoss()
@@ -89,6 +94,7 @@ namespace DailyCumulativeLoss
             DclSnapshot snapshot = state.Update(nowUtc, balance, openPnL, MaxDailyLoss);
 
             PlotRelativeRisk(snapshot);
+            CheckRiskAlerts(snapshot);
 
             if (!hadSnapshot || snapshot.DailyPeakBalance > previousPeak)
                 cacheStore.AppendAsync(SelectedAccount.Name, currentSessionDateKey, snapshot, sessionClock.ToLocalTime(nowUtc));
@@ -200,6 +206,7 @@ namespace DailyCumulativeLoss
             currentSessionDateKey = sessionClock.GetSessionDateKey(currentSessionStartUtc.Value);
             cacheStore = new CsvCacheStore(CacheDirectory);
             state.Reset();
+            ResetSessionAlerts();
             RestoreSessionState();
         }
 
@@ -212,6 +219,7 @@ namespace DailyCumulativeLoss
             currentSessionStartUtc = sessionStartUtc;
             currentSessionDateKey = sessionClock.GetSessionDateKey(sessionStartUtc);
             state.Reset();
+            ResetSessionAlerts();
             RestoreSessionState();
         }
 
@@ -354,6 +362,7 @@ namespace DailyCumulativeLoss
             double openPnL = GetOpenProfitLoss(SelectedAccount);
             DclSnapshot snapshot = state.Update(nowUtc, balance, openPnL, MaxDailyLoss);
 
+            CheckRiskAlerts(snapshot);
             cacheStore.AppendAsync(SelectedAccount.Name, currentSessionDateKey, snapshot, sessionClock.ToLocalTime(nowUtc));
         }
 
@@ -535,6 +544,46 @@ namespace DailyCumulativeLoss
         private static bool IsFinite(double value)
         {
             return !double.IsNaN(value) && !double.IsInfinity(value);
+        }
+
+        private void CheckRiskAlerts(DclSnapshot snapshot)
+        {
+            if (!EnablePlatformAlerts || MaxDailyLoss <= 0)
+                return;
+
+            DclRiskLevel riskLevel = GetRiskLevel(snapshot);
+
+            if (riskLevel == DclRiskLevel.Critical && !criticalAlertSent)
+            {
+                criticalAlertSent = true;
+                SendRiskAlert("CRITICAL", snapshot);
+                return;
+            }
+
+            if (riskLevel == DclRiskLevel.Warning && !warningAlertSent)
+            {
+                warningAlertSent = true;
+                SendRiskAlert("WARNING", snapshot);
+            }
+        }
+
+        private void SendRiskAlert(string severity, DclSnapshot snapshot)
+        {
+            try
+            {
+                string accountName = SelectedAccount?.Name ?? "selected account";
+                string message = $"DCL {severity} - {accountName}: {FormatCurrency(snapshot.RemainingDailyLimit)} remaining, {FormatCurrency(snapshot.DailyCumulativeLoss)} used.";
+                Core.Instance.Alert(message, string.Empty, string.Empty, null, "Daily Cumulative Loss");
+            }
+            catch
+            {
+            }
+        }
+
+        private void ResetSessionAlerts()
+        {
+            warningAlertSent = false;
+            criticalAlertSent = false;
         }
 
         private static DateTime ToUtc(DateTime dateTime)

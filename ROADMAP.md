@@ -15,6 +15,7 @@ L'indicateur doit rester simple dans son coeur mathematique: il echantillonne l'
 - [x] Coeur de calcul `DclState` ajoute: equity, peak, DCL, remaining DLL, liquidation threshold.
 - [x] `SessionClock` ajoute pour gerer le debut de session a 23:00 Europe/Paris.
 - [x] Cache CSV local ajoute: restauration du dernier peak et append async sur nouveau peak.
+- [x] Ecritures CSV chainees en file async pour conserver l'ordre des snapshots.
 - [x] Lecture CSV resiliente: les lignes corrompues en fin de fichier sont ignorees.
 - [x] Append CSV force sur `ClosedPositionAdded` quand la position cloturee appartient au compte suivi.
 - [x] Reference locale `TradingPlatform.BusinessLayer.dll` configuree via projet Visual Studio.
@@ -23,6 +24,7 @@ L'indicateur doit rester simple dans son coeur mathematique: il echantillonne l'
 - [x] Bandes de fond safe/warning/critical ajoutees dans le panel.
 - [x] Mode diagnostic optionnel ajoute au HUD: session, statut cache, nombre d'ecritures, derniere erreur I/O.
 - [x] Fallback historique conservateur ajoute: reconstruction du peak realise depuis les positions cloturees de la session quand le cache est absent.
+- [x] Alertes plateforme optionnelles ajoutees: warning a 50% restant, critique a 25%, une fois par session.
 - [ ] Fallback historique complet avec replay bars/ticks intratrade.
 
 ## Principes Directeurs

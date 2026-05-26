@@ -11,7 +11,9 @@ namespace DailyCumulativeLoss
     {
         private const string Header = "Timestamp_UTC;Timestamp_Local;Balance;OpenPnL;CurrentEquity;DailyPeakBalance;DailyCumulativeLoss";
         private readonly object fileLock = new object();
+        private readonly object queueLock = new object();
         private readonly string cacheDirectory;
+        private Task writeQueue = Task.CompletedTask;
 
         public string LastReadStatus { get; private set; } = "not checked";
         public string LastError { get; private set; } = string.Empty;
@@ -69,7 +71,8 @@ namespace DailyCumulativeLoss
             string path = GetCachePath(accountName, sessionDateKey);
             string line = FormatLine(snapshot, localTimestamp);
 
-            _ = Task.Run(() => Append(path, line));
+            lock (queueLock)
+                writeQueue = writeQueue.ContinueWith(_ => Append(path, line), TaskScheduler.Default);
         }
 
         private void Append(string path, string line)
