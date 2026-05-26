@@ -22,6 +22,7 @@ L'indicateur doit rester simple dans son coeur mathematique: il echantillonne l'
 - [x] Rendu HUD custom ajoute avec couleurs de risque et clignotement critique.
 - [x] Axe Y relatif implemente: `0` = liquidation, `MaxDailyLoss` = room maximale, ligne principale = DLL restante.
 - [x] Bandes de fond safe/warning/critical ajoutees dans le panel.
+- [x] Courbe DLL restante colorisee par segments: vert en recuperation, rouge en degradation, crimson en zone critique.
 - [x] Mode diagnostic optionnel ajoute au HUD: session, statut cache, nombre d'ecritures, derniere erreur I/O.
 - [x] Fallback historique conservateur ajoute: reconstruction du peak realise depuis les positions cloturees de la session quand le cache est absent.
 - [x] Alertes plateforme optionnelles ajoutees: warning a 50% restant, critique a 25%, une fois par session.

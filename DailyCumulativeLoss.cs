@@ -113,6 +113,9 @@ namespace DailyCumulativeLoss
 
             base.OnPaintChart(args);
 
+            if (args?.Graphics != null && MaxDailyLoss > 0)
+                DrawColoredRemainingLine(args.Graphics, args.Rectangle, args.LeftVisibleBarIndex, args.RightVisibleBarIndex);
+
             if (!HudEnabled || !state.HasSnapshot || args?.Graphics == null)
                 return;
 
@@ -162,6 +165,56 @@ namespace DailyCumulativeLoss
             double clamped = Math.Max(min, Math.Min(max, value));
             double ratio = (clamped - min) / (max - min);
             return panel.Bottom - (int)Math.Round(ratio * panel.Height);
+        }
+
+        private void DrawColoredRemainingLine(Graphics graphics, Rectangle panel, int leftVisibleBarIndex, int rightVisibleBarIndex)
+        {
+            if (Count < 2 || panel.Width <= 0 || panel.Height <= 0)
+                return;
+
+            int startIndex = Math.Max(0, leftVisibleBarIndex);
+            int endIndex = Math.Min(Count - 1, rightVisibleBarIndex);
+
+            if (endIndex <= startIndex)
+                return;
+
+            GetRelativeScaleBounds(out double min, out double max);
+
+            double? previousValue = null;
+            Point? previousPoint = null;
+
+            for (int barIndex = startIndex; barIndex <= endIndex; barIndex++)
+            {
+                int offset = Count - 1 - barIndex;
+                double value = GetValue(RemainingLineIndex, offset);
+
+                if (!IsFinite(value))
+                {
+                    previousValue = null;
+                    previousPoint = null;
+                    continue;
+                }
+
+                int x = panel.Left + (int)Math.Round((barIndex - startIndex) / (double)(endIndex - startIndex) * panel.Width);
+                int y = ValueToY(panel, min, max, value);
+                Point point = new Point(x, y);
+
+                if (previousPoint.HasValue && previousValue.HasValue)
+                    DrawRemainingSegment(graphics, previousPoint.Value, point, previousValue.Value, value);
+
+                previousValue = value;
+                previousPoint = point;
+            }
+        }
+
+        private void DrawRemainingSegment(Graphics graphics, Point from, Point to, double previousValue, double value)
+        {
+            Color color = value < MaxDailyLoss * 0.25
+                ? Color.Crimson
+                : value >= previousValue ? Color.LimeGreen : Color.Red;
+
+            using Pen pen = new Pen(color, 2.5f);
+            graphics.DrawLine(pen, from, to);
         }
 
         private void DrawHud(Graphics graphics, Rectangle panel, DclSnapshot snapshot)
@@ -556,6 +609,7 @@ namespace DailyCumulativeLoss
             if (riskLevel == DclRiskLevel.Critical && !criticalAlertSent)
             {
                 criticalAlertSent = true;
+                warningAlertSent = true;
                 SendRiskAlert("CRITICAL", snapshot);
                 return;
             }
