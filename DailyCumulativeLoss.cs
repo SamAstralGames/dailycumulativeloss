@@ -39,6 +39,9 @@ namespace DailyCumulativeLoss
         [InputParameter("Enable platform alerts", 8)]
         public bool EnablePlatformAlerts = true;
 
+        [InputParameter("Show level labels", 9)]
+        public bool ShowLevelLabels = true;
+
         private readonly DclState state = new DclState();
         private SessionClock sessionClock;
         private CsvCacheStore cacheStore;
@@ -109,7 +112,10 @@ namespace DailyCumulativeLoss
         public override void OnPaintChart(PaintChartEventArgs args)
         {
             if (args?.Graphics != null && MaxDailyLoss > 0)
+            {
                 DrawRiskZones(args.Graphics, args.Rectangle);
+                DrawLevelGuides(args.Graphics, args.Rectangle);
+            }
 
             base.OnPaintChart(args);
 
@@ -165,6 +171,45 @@ namespace DailyCumulativeLoss
             double clamped = Math.Max(min, Math.Min(max, value));
             double ratio = (clamped - min) / (max - min);
             return panel.Bottom - (int)Math.Round(ratio * panel.Height);
+        }
+
+        private void DrawLevelGuides(Graphics graphics, Rectangle panel)
+        {
+            if (!ShowLevelLabels || panel.Width <= 0 || panel.Height <= 0)
+                return;
+
+            GetRelativeScaleBounds(out double min, out double max);
+
+            DrawLevelGuide(graphics, panel, min, max, MaxDailyLoss, "100%");
+            DrawLevelGuide(graphics, panel, min, max, MaxDailyLoss * 0.5, "50%");
+            DrawLevelGuide(graphics, panel, min, max, MaxDailyLoss * 0.25, "25%");
+            DrawLevelGuide(graphics, panel, min, max, 0, "0");
+        }
+
+        private static void DrawLevelGuide(Graphics graphics, Rectangle panel, double min, double max, double value, string label)
+        {
+            int y = ValueToY(panel, min, max, value);
+
+            using Pen pen = new Pen(Color.FromArgb(80, Color.White), 1)
+            {
+                DashStyle = System.Drawing.Drawing2D.DashStyle.Dash
+            };
+
+            graphics.DrawLine(pen, panel.Left, y, panel.Right, y);
+
+            using Font font = new Font("Segoe UI", 8, FontStyle.Bold);
+            SizeF labelSize = graphics.MeasureString(label, font);
+            RectangleF labelRect = new RectangleF(
+                panel.Right - labelSize.Width - 8,
+                y - labelSize.Height / 2,
+                labelSize.Width + 6,
+                labelSize.Height);
+
+            using SolidBrush background = new SolidBrush(Color.FromArgb(130, 18, 22, 28));
+            using SolidBrush foreground = new SolidBrush(Color.FromArgb(210, Color.White));
+
+            graphics.FillRectangle(background, labelRect);
+            graphics.DrawString(label, font, foreground, labelRect.Left + 3, labelRect.Top);
         }
 
         private void DrawColoredRemainingLine(Graphics graphics, Rectangle panel, int leftVisibleBarIndex, int rightVisibleBarIndex)
