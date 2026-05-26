@@ -29,9 +29,10 @@ L'indicateur doit rester simple dans son coeur mathematique: il echantillonne l'
 - [x] Diagnostic cache enrichi avec le max DCL restaure depuis le CSV.
 - [x] Anti-spam alertes restaure depuis le dernier DCL cache apres redemarrage.
 - [x] Fallback historique conservateur ajoute: reconstruction du peak realise depuis les positions cloturees de la session quand le cache est absent.
+- [x] Moteur de replay historique best-effort ajoute: tentative de replay intratrade via historique tick puis 1 minute, avec fallback realise si l'API historique est indisponible.
 - [x] Alertes plateforme optionnelles ajoutees: warning a 50% restant, critique a 25%, une fois par session.
 - [x] README ajoute avec installation, parametres, cache et checklist de validation.
-- [ ] Fallback historique complet avec replay bars/ticks intratrade.
+- [ ] Validation Quantower du replay historique bars/ticks intratrade sur compte demo.
 
 ## Principes Directeurs
 
@@ -294,10 +295,11 @@ L'indicateur doit rester simple dans son coeur mathematique: il echantillonne l'
 - Prevoir un mode degradation:
   - si l'historique tick est indisponible, utiliser OHLC 1 minute
   - si les trades sont indisponibles, initialiser sur l'equity actuelle avec avertissement
+- Exposer le mode utilise et le nombre d'objets historiques rejoues dans le diagnostic HUD.
 
 ### Criteres D'Acceptation
 
-- Sans cache, le moteur tente une restauration historique.
+- Sans cache, le moteur tente une restauration historique tick puis 1 minute.
 - Les erreurs API n'arretent pas l'indicateur.
 - Le mode degradation est explicite dans les logs.
 - La restauration historique ne s'execute jamais dans `OnUpdate()`.

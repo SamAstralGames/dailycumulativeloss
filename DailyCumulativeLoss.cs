@@ -3,6 +3,7 @@ using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using TradingPlatform.BusinessLayer;
 
 namespace DailyCumulativeLoss
@@ -46,12 +47,18 @@ namespace DailyCumulativeLoss
         private readonly DclState state = new DclState();
         private SessionClock sessionClock;
         private CsvCacheStore cacheStore;
+        private HistoricalRecoveryEngine historicalRecoveryEngine;
         private DateTime? currentSessionStartUtc;
         private string currentSessionDateKey;
         private string recoveryStatus = "not checked";
+        private HistoricalRecoveryResult historicalRecoveryResult;
         private bool warningAlertSent;
         private bool criticalAlertSent;
         private bool coreEventsSubscribed;
+        private readonly object historicalRecoverySync = new object();
+        private int historicalRecoveryGeneration;
+        private bool hasPendingHistoricalRecovery;
+        private HistoricalRecoveryResult pendingHistoricalRecoveryResult;
 
         public DailyCumulativeLoss()
             : base()
@@ -90,6 +97,7 @@ namespace DailyCumulativeLoss
 
             DateTime nowUtc = DateTime.UtcNow;
             EnsureCurrentSession(nowUtc);
+            ApplyPendingHistoricalRecovery();
 
             double balance = SelectedAccount.Balance;
             double openPnL = GetOpenProfitLoss(SelectedAccount);
@@ -305,6 +313,7 @@ namespace DailyCumulativeLoss
             currentSessionStartUtc = sessionClock.GetSessionStartUtc(DateTime.UtcNow);
             currentSessionDateKey = sessionClock.GetSessionDateKey(currentSessionStartUtc.Value);
             cacheStore = new CsvCacheStore(CacheDirectory);
+            historicalRecoveryEngine = new HistoricalRecoveryEngine();
             state.Reset();
             ResetSessionAlerts();
             RestoreSessionState();
@@ -325,15 +334,22 @@ namespace DailyCumulativeLoss
 
         private void RestoreSessionState()
         {
+            historicalRecoveryGeneration++;
+            lock (historicalRecoverySync)
+            {
+                hasPendingHistoricalRecovery = false;
+            }
+
+            historicalRecoveryResult = HistoricalRecoveryResult.NotRestored("not checked");
+
             if (RestorePeakFromCache())
             {
                 recoveryStatus = "cache";
                 return;
             }
 
-            if (EnableHistoricalRecovery && RestorePeakFromClosedPositions())
+            if (EnableHistoricalRecovery && StartHistoricalRecovery())
             {
-                recoveryStatus = "closed positions";
                 return;
             }
 
@@ -355,40 +371,61 @@ namespace DailyCumulativeLoss
             return false;
         }
 
-        private bool RestorePeakFromClosedPositions()
+        private bool StartHistoricalRecovery()
         {
             if (SelectedAccount == null || currentSessionStartUtc == null)
                 return false;
 
-            double currentEquity = SelectedAccount.Balance + GetOpenProfitLoss(SelectedAccount);
-            var sessionPnls = Core.Instance.ClosedPositions
-                .Where(position => TradingObjectBelongsToAccount(position, SelectedAccount))
-                .Select(position => new
+            int generation = historicalRecoveryGeneration;
+            Account account = SelectedAccount;
+            DateTime sessionStartUtc = currentSessionStartUtc.Value;
+            double balance = SelectedAccount.Balance;
+            double openPnL = GetOpenProfitLoss(SelectedAccount);
+            HistoricalRecoveryEngine engine = historicalRecoveryEngine;
+
+            recoveryStatus = "history pending";
+
+            Task.Run(() => engine.Recover(account, sessionStartUtc, balance, openPnL))
+                .ContinueWith(task =>
                 {
-                    CloseTimeUtc = TryGetCloseTimeUtc(position, out DateTime closeTimeUtc) ? closeTimeUtc : DateTime.MinValue,
-                    PnL = GetTradingObjectPnL(position)
-                })
-                .Where(item => item.CloseTimeUtc >= currentSessionStartUtc.Value)
-                .OrderBy(item => item.CloseTimeUtc)
-                .ToArray();
+                    HistoricalRecoveryResult result = task.Exception == null
+                        ? task.Result
+                        : HistoricalRecoveryResult.NotRestored($"history error: {task.Exception.GetBaseException().Message}");
 
-            if (sessionPnls.Length == 0)
-                return false;
+                    lock (historicalRecoverySync)
+                    {
+                        if (generation != historicalRecoveryGeneration)
+                            return;
 
-            double runningBalance = SelectedAccount.Balance - sessionPnls.Sum(item => item.PnL);
-            double peak = Math.Max(runningBalance, currentEquity);
+                        pendingHistoricalRecoveryResult = result;
+                        hasPendingHistoricalRecovery = true;
+                    }
+                }, TaskScheduler.Default);
 
-            foreach (var item in sessionPnls)
+            return true;
+        }
+
+        private void ApplyPendingHistoricalRecovery()
+        {
+            HistoricalRecoveryResult result;
+
+            lock (historicalRecoverySync)
             {
-                runningBalance += item.PnL;
-                peak = Math.Max(peak, runningBalance);
+                if (!hasPendingHistoricalRecovery)
+                    return;
+
+                result = pendingHistoricalRecoveryResult;
+                hasPendingHistoricalRecovery = false;
             }
 
-            if (peak <= currentEquity)
-                return false;
+            historicalRecoveryResult = result;
+            recoveryStatus = result.Status;
 
-            state.RestoreDailyPeak(peak);
-            return true;
+            if (!result.Restored)
+                return;
+
+            if (!state.HasSnapshot || result.DailyPeakBalance > state.Snapshot.DailyPeakBalance)
+                state.RestoreDailyPeak(result.DailyPeakBalance);
         }
 
         private void PlotRelativeRisk(DclSnapshot snapshot)
@@ -414,10 +451,14 @@ namespace DailyCumulativeLoss
             string cacheError = string.IsNullOrWhiteSpace(cacheStore?.LastError) ? "ok" : Truncate(cacheStore.LastError, 42);
             string cacheFile = string.IsNullOrWhiteSpace(cacheStore?.LastPath) ? "none" : Path.GetFileName(cacheStore.LastPath);
             string cachedMaxDcl = FormatCurrency(cacheStore?.MaxCachedDailyCumulativeLoss ?? 0);
+            string replay = historicalRecoveryResult.Restored
+                ? $"{historicalRecoveryResult.ReplayedPositionCount}/{historicalRecoveryResult.ClosedPositionCount}, {historicalRecoveryResult.ReplayedHistoryItemCount} items"
+                : "none";
 
             return text +
                 $"\nSession: {currentSessionDateKey}" +
                 $"\nRecovery: {recoveryStatus}" +
+                $"\nReplay: {replay}" +
                 $"\nCache: {cacheStatus}" +
                 $"\nFile: {cacheFile}" +
                 $"\nCache max DCL: {cachedMaxDcl}" +
@@ -462,6 +503,7 @@ namespace DailyCumulativeLoss
 
             DateTime nowUtc = DateTime.UtcNow;
             EnsureCurrentSession(nowUtc);
+            ApplyPendingHistoricalRecovery();
 
             double balance = SelectedAccount.Balance;
             double openPnL = GetOpenProfitLoss(SelectedAccount);
@@ -529,23 +571,6 @@ namespace DailyCumulativeLoss
             return 0;
         }
 
-        private static bool TryGetCloseTimeUtc(object tradingObject, out DateTime closeTimeUtc)
-        {
-            string[] propertyNames = { "CloseTime", "ClosedTime", "CloseDateTime", "DateTime", "LastUpdateTime" };
-
-            foreach (string propertyName in propertyNames)
-            {
-                if (TryReadDateTimeProperty(tradingObject, propertyName, out DateTime value))
-                {
-                    closeTimeUtc = ToUtc(value);
-                    return true;
-                }
-            }
-
-            closeTimeUtc = default;
-            return false;
-        }
-
         private static bool TryReadNumericProperty(object source, string propertyName, out double value)
         {
             value = 0;
@@ -565,22 +590,6 @@ namespace DailyCumulativeLoss
 
             value = rawValue?.ToString();
             return !string.IsNullOrWhiteSpace(value);
-        }
-
-        private static bool TryReadDateTimeProperty(object source, string propertyName, out DateTime value)
-        {
-            value = default;
-
-            if (!TryReadObjectProperty(source, propertyName, out object rawValue))
-                return false;
-
-            if (rawValue is DateTime dateTime)
-            {
-                value = dateTime;
-                return true;
-            }
-
-            return DateTime.TryParse(rawValue.ToString(), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out value);
         }
 
         private static bool TryReadObjectProperty(object source, string propertyName, out object value)
@@ -705,17 +714,6 @@ namespace DailyCumulativeLoss
 
             if (cachedRemaining <= MaxDailyLoss * 0.5)
                 warningAlertSent = true;
-        }
-
-        private static DateTime ToUtc(DateTime dateTime)
-        {
-            if (dateTime.Kind == DateTimeKind.Utc)
-                return dateTime;
-
-            if (dateTime.Kind == DateTimeKind.Local)
-                return dateTime.ToUniversalTime();
-
-            return dateTime;
         }
 
         private DclRiskLevel GetRiskLevel(DclSnapshot snapshot)
